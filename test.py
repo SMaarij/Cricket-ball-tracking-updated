@@ -1,13 +1,20 @@
 from ultralytics import YOLO
 import cv2
 import numpy as np
+from inference_sdk import InferenceHTTPClient
 
-# Load the trained model
-model = YOLO('runs/detect/train/weights/best.pt')
+# Roboflow Inference Client
+CLIENT = InferenceHTTPClient(
+    api_url="https://detect.roboflow.com",
+    api_key="TWWx3s94S7ZX3Kg2rq2e"
+)
+
+# Load the trained YOLO model
+model = YOLO('runs/detect/train2/weights/best.pt')
 
 # Path to the video
 video_path = 'Copy of cover_0015.avi'
-output_path = 'annotated_output_with_length4.mp4'  # Output video path
+output_path = 'annotated_output_with_bounce4.mp4'  # Output video path
 
 # Open video file
 cap = cv2.VideoCapture(video_path)
@@ -30,56 +37,33 @@ new_fps = fps / slowdown_factor
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use 'mp4v' codec for MP4 format
 out = cv2.VideoWriter(output_path, fourcc, new_fps, (width, height))
 
-# Capture the first frame to establish fixed line positions
-ret, reference_frame = cap.read()
-if not ret:
-    print(f"Error: Could not read the first frame of video")
-    cap.release()
-    out.release()
-    exit()
+def detect_pitch(frame):
+    """
+    Function to detect the pitch area in the frame using Roboflow API.
+    """
+    # Save the current frame to a temporary image file
+    cv2.imwrite('current_frame.jpg', frame)
 
-# Define lengths as a proportion of the reference frame height
-def get_fixed_length_lines(frame_height):
-    short_length_y = int(0.65 * frame_height)
-    good_length_y = int(0.55 * frame_height)
-    full_length_y = int(0.45 * frame_height)
-    yorker_length_y = int(0.35 * frame_height)
+    # Infer using the Roboflow model
+    result = CLIENT.infer('current_frame.jpg', model_id="cricket-pitch-t9j9g/2")
 
-    return {
-        "short_length_y": short_length_y,
-        "good_length_y": good_length_y,
-        "full_length_y": full_length_y,
-        "yorker_length_y": yorker_length_y
-    }
-
-# Get fixed line positions based on the reference frame
-fixed_lines = get_fixed_length_lines(height)
-
-def classify_ball_length(ball_x, ball_y, frame_width, fixed_lines):
-    short_length_y = fixed_lines["short_length_y"]
-    good_length_y = fixed_lines["good_length_y"]
-    full_length_y = fixed_lines["full_length_y"]
-    yorker_length_y = fixed_lines["yorker_length_y"]
-
-    short_region_x = int(0.25 * frame_width)
-    good_region_x = int(0.35 * frame_width)
-    full_region_x = int(0.45 * frame_width)
-    yorker_region_x = int(0.55 * frame_width)
-
-    if ball_y >= short_length_y:
-        length = "Short Pitched" if ball_x >= short_region_x else "Short Length"
-    elif ball_y >= good_length_y:
-        length = "Good Length" if ball_x >= good_region_x else "Full Length"
-    elif ball_y >= full_length_y:
-        length = "Full Length" if ball_x >= full_region_x else "Yorker Length"
-    elif ball_y >= yorker_length_y:
-        length = "Yorker Length" if ball_x >= yorker_region_x else "Beyond Yorker"
+    # Extract bounding box coordinates for the pitch
+    if result['predictions']:
+        pitch = result['predictions'][0]
+        x, y, w, h = pitch['x'], pitch['y'], pitch['width'], pitch['height']
+        x1 = int(x - w / 2)
+        y1 = int(y - h / 2)
+        x2 = x1 + w
+        y2 = y1 + h
+        return x1, y1, x2, y2
     else:
-        length = "Beyond Yorker"
-    
-    return length
+        print("Error: No pitch detected.")
+        return None, None, None, None
 
-def draw_pitch_lines(frame, fixed_lines):
+def draw_pitch_length_annotations(frame, pitch_x1, pitch_y1, pitch_x2, pitch_y2):
+    """
+    Draw pitch length annotations on the frame based on detected pitch coordinates.
+    """
     # Define colors for each region
     colors = {
         "Short": (0, 0, 255),   # Red
@@ -88,22 +72,63 @@ def draw_pitch_lines(frame, fixed_lines):
         "Yorker": (0, 255, 255) # Yellow
     }
 
-    # Draw pitch regions on the frame
-    cv2.rectangle(frame, (0, fixed_lines["short_length_y"]), (width, fixed_lines["good_length_y"]), colors["Short"], 2)
-    cv2.rectangle(frame, (0, fixed_lines["good_length_y"]), (width, fixed_lines["full_length_y"]), colors["Good"], 2)
-    cv2.rectangle(frame, (0, fixed_lines["full_length_y"]), (width, fixed_lines["yorker_length_y"]), colors["Full"], 2)
-    cv2.rectangle(frame, (0, fixed_lines["yorker_length_y"]), (width, 0), colors["Yorker"], 2)
+    # Ensure the coordinates are integers
+    pitch_x1, pitch_y1, pitch_x2, pitch_y2 = map(int, [pitch_x1, pitch_y1, pitch_x2, pitch_y2])
 
-    # Optionally add text labels
-    cv2.putText(frame, "Short", (50, fixed_lines["short_length_y"] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, colors["Short"], 2)
-    cv2.putText(frame, "Good", (50, fixed_lines["good_length_y"] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, colors["Good"], 2)
-    cv2.putText(frame, "Full", (50, fixed_lines["full_length_y"] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, colors["Full"], 2)
-    cv2.putText(frame, "Yorker", (50, fixed_lines["yorker_length_y"] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, colors["Yorker"], 2)
+    # Calculate y-coordinates for the length annotations based on pitch height
+    yorker_length_y = int(pitch_y1 + 0.10 * (pitch_y2 - pitch_y1))
+    full_length_y = int(pitch_y1 + 0.25 * (pitch_y2 - pitch_y1))
+    good_length_y = int(pitch_y1 + 0.40 * (pitch_y2 - pitch_y1))
+    short_length_y = int(pitch_y1 + 0.55 * (pitch_y2 - pitch_y1))
+
+    # Draw pitch length regions on the frame
+    cv2.rectangle(frame, (pitch_x1, short_length_y), (pitch_x2, pitch_y2), colors["Short"], 2)
+    cv2.rectangle(frame, (pitch_x1, good_length_y), (pitch_x2, short_length_y), colors["Good"], 2)
+    cv2.rectangle(frame, (pitch_x1, full_length_y), (pitch_x2, good_length_y), colors["Full"], 2)
+    cv2.rectangle(frame, (pitch_x1, yorker_length_y), (pitch_x2, full_length_y), colors["Yorker"], 2)
+
+    # Add text labels
+    cv2.putText(frame, "Short", (pitch_x1 + 10, short_length_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colors["Short"], 2)
+    cv2.putText(frame, "Good", (pitch_x1 + 10, good_length_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colors["Good"], 2)
+    cv2.putText(frame, "Full", (pitch_x1 + 10, full_length_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colors["Full"], 2)
+    cv2.putText(frame, "Yorker", (pitch_x1 + 10, yorker_length_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colors["Yorker"], 2)
+
+def classify_bounce(ball_y, pitch_y1, pitch_y2):
+    """
+    Classify the bounce position based on the y-coordinate relative to the pitch.
+    """
+    yorker_length_y = int(pitch_y1 + 0.10 * (pitch_y2 - pitch_y1))
+    full_length_y = int(pitch_y1 + 0.20 * (pitch_y2 - pitch_y1))
+    good_length_y = int(pitch_y1 + 0.35 * (pitch_y2 - pitch_y1))
+    short_length_y = int(pitch_y1 + 0.50 * (pitch_y2 - pitch_y1))
+
+    if ball_y >= short_length_y:
+        return "Short"
+    elif ball_y >= good_length_y:
+        return "Good"
+    elif ball_y >= full_length_y:
+        return "Full"
+    elif ball_y >= yorker_length_y:
+        return "Yorker"
+    else:
+        return "Beyond Yorker"
+
+# Initialize variables to track the ball's position and detect bounce
+prev_ball_y = None
+bounce_detected = False
 
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
+
+    # Perform pitch detection using Roboflow API
+    pitch_x1, pitch_y1, pitch_x2, pitch_y2 = detect_pitch(frame)
+
+    # Ensure that the pitch was detected before proceeding
+    if pitch_x1 is None:
+        print("Error: Pitch detection failed. Skipping frame.")
+        continue
 
     # Perform detection
     results = model(frame)
@@ -111,18 +136,40 @@ while cap.isOpened():
     # Annotate frame
     annotated_frame = results[0].plot()
 
-    # Draw the pitch lines on the annotated frame
-    draw_pitch_lines(annotated_frame, fixed_lines)
+    # Draw the pitch lines and pitch length annotations on the annotated frame
+    draw_pitch_length_annotations(annotated_frame, pitch_x1, pitch_y1, pitch_x2, pitch_y2)
 
-    # Draw bounding boxes and classify ball length
+    # Initialize variables to track the highest confidence box
+    highest_confidence = 0
+    best_box = None
+    best_label = None
+
     for detection in results[0].boxes:
-        # Extract bounding box coordinates
+        # Extract bounding box coordinates and confidence score
         x1, y1, x2, y2 = detection.xyxy[0].tolist()
+        confidence = detection.conf[0].tolist()  # Confidence score of the detection
+
+        # Update the best box if the current confidence is higher
+        if confidence > highest_confidence:
+            highest_confidence = confidence
+            best_box = (x1, y1, x2, y2)
+            best_label = detection.cls[0].tolist()  # Label of the detection
+
+    if best_box is not None:
+        x1, y1, x2, y2 = best_box
         cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
-        
-        # Classify the ball's length and region based on its position
-        ball_length = classify_ball_length(cx, cy, width, fixed_lines)
-        print(f"Ball landed in {ball_length}")
+
+        # Detect bounce
+        if prev_ball_y is not None:
+            if not bounce_detected and cy > prev_ball_y:  # Ball was going downwards
+                bounce_detected = True
+                print(f"Bounce detected at ({cx}, {cy})")
+                bounce_position = classify_bounce(cy, pitch_y1, pitch_y2)
+                cv2.putText(annotated_frame, f"Bounce: {bounce_position}", (cx, cy - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+            elif cy < prev_ball_y:
+                bounce_detected = False  # Reset for next potential bounce detection
+
+        prev_ball_y = cy
 
         # Define colors for different lengths
         colors = {
@@ -134,14 +181,11 @@ while cap.isOpened():
         }
 
         # Draw the bounding box and ball landing classification
-        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), colors.get(ball_length, (255, 255, 255)), 2)
-        cv2.putText(annotated_frame, ball_length, (cx, cy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colors.get(ball_length, (255, 255, 255)), 2)
-
-    # Write annotated frame to output video
+        cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), colors.get(best_label, (255, 255, 255)), 2)
+        
+    # Write the annotated frame to the output video
     out.write(annotated_frame)
 
-# Release resources
+# Release the video capture and writer objects
 cap.release()
 out.release()
-
-print(f"Annotated video saved as {output_path}")
