@@ -1,0 +1,7 @@
+path: C:/Users/NEDUET/Desktop/CricketBallDetection.v1i.yolov8-obb/Cricket-Ball-Tracking-main/data.yaml
+
+train: C:/Users/NEDUET/Desktop/CricketBallDetection.v1i.yolov8-obb/Cricket-Ball-Tracking-main/images/train
+val : C:/Users/NEDUET/Desktop/CricketBallDetection.v1i.yolov8-obb/Cricket-Ball-Tracking-main/images/val
+
+nc: 1  # Number of classes
+names: ['cricket_ball']  # Class names
