@@ -18,8 +18,8 @@ CLIENT_POSE = InferenceHTTPClient(
 model = YOLO('runs/detect/train2/weights/best.pt')
 
 # Path to the video
-video_path = 'Copy of cover_0015.avi'
-output_path = 'annotated_output_with_continuous_display12.mp4'  # Updated output video path
+video_path = 'Copy of cover_0042.avi'
+output_path = 'annotated_output_with_continuous_display14.mp4'  # Updated output video path
 
 # Open video file
 cap = cv2.VideoCapture(video_path)

@@ -18,8 +18,8 @@ CLIENT_POSE = InferenceHTTPClient(
 model = YOLO('runs/detect/train2/weights/best.pt')
 
 # Path to the video
-video_path = 'Copy of cover_0015.avi'
-output_path = 'annotated_output_with_continuous_display12.mp4'  # Updated output video path
+video_path = 'Copy of cover_0042.avi'
+output_path = 'annotated_output_with_continuous_display1.mp4'  # Updated output video path
 
 # Open video file
 cap = cv2.VideoCapture(video_path)
@@ -54,7 +54,6 @@ def detect_pose(frame):
     if result['predictions']:
         pose = result['predictions'][0]
         print("Pose prediction details:", pose)  # Add this line to inspect the details of the pose
-        # Adjust this based on actual key names in the response
         return pose.get('class', "Unknown")  # Use the actual key name found in the response
     else:
         print("Error: No pose detected.")
@@ -165,61 +164,54 @@ while cap.isOpened():
     # Perform detection
     results = model(frame)
 
-    # Annotate frame
-    annotated_frame = results[0].plot()
-
     # Track the pitch area
     if detected_pitch_x1 is not None:
         pitch_x1, pitch_y1, pitch_x2, pitch_y2 = detected_pitch_x1, detected_pitch_y1, detected_pitch_x2, detected_pitch_y2
 
-    # Draw the pitch lines and pitch length annotations only when bounce is detected
-    if bounce_detected and pitch_x1 is not None:
-        draw_pitch_length_annotations(annotated_frame, pitch_x1, pitch_y1, pitch_x2, pitch_y2)
-        bounce_detected = False  # Reset after drawing annotations
-
-    # Initialize variables to track the highest confidence box that matches the circular shape criteria
+    # Find the highest confidence box among all detections
     highest_confidence_box = None
-    highest_confidence = -1
+    highest_avg_confidence = -1
 
     for r in results[0].boxes:
         x1, y1, x2, y2 = map(int, r.xyxy[0])
-        width = x2 - x1
-        height = y2 - y1
+        confidence = float(r.conf[0])
 
-        # Aspect ratio check to ensure detection is circular
-        aspect_ratio = width / height
+        # Find the highest confidence detection
+        if confidence > highest_avg_confidence:
+            highest_avg_confidence = confidence
+            highest_confidence_box = (x1, y1, x2, y2)
 
-        if 0.9 <= aspect_ratio <= 1.1:
-            if r.conf[0] > highest_confidence:
-                highest_confidence = r.conf[0]
-                highest_confidence_box = (x1, y1, x2, y2)
-
-    # If a circle-like object is detected, process it
     if highest_confidence_box:
         x1, y1, x2, y2 = highest_confidence_box
-        center_x = (x1 + x2) // 2
-        center_y = (y1 + y2) // 2
+        ball_y = int((y1 + y2) / 2)
 
-        if prev_ball_y is not None and center_y > prev_ball_y:  # Check if the ball is falling down
-            if pitch_y1 is not None and pitch_y2 is not None:
-                if center_y >= pitch_y1 and center_y <= pitch_y2:
-                    bounce_detected = True
-                    last_bounce_classification, last_length_description = classify_bounce(center_y, pitch_y1, pitch_y2)
-                    last_bounce_coordinates = (center_x, center_y)
+        # Draw bounding box and label
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f"Confidence: {highest_avg_confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-        # Update previous ball position
-        prev_ball_y = center_y
+        # If pitch is detected and we have the ball's y-coordinate, classify bounce position
+        if pitch_x1 is not None:
+            bounce_classification, length_description = classify_bounce(ball_y, pitch_y1, pitch_y2)
+            last_bounce_classification = bounce_classification
+            last_length_description = length_description
+            last_bounce_coordinates = (x1, y1, x2, y2)
 
-    # Display bounce classification on the frame
-    cv2.putText(annotated_frame, f"Bounced: {last_bounce_classification} ({last_length_description})", 
-                (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            # Draw pitch length annotations
+            draw_pitch_length_annotations(frame, pitch_x1, pitch_y1, pitch_x2, pitch_y2)
+        text_x = 10  # Keep the text near the left edge of the frame
+        text_y_middle = height // 2
 
-    # Display the detected pose (e.g., "Cover Drive" or "Unknown")
-    cv2.putText(annotated_frame, f"Shot Type: {shot_type}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        # Draw last detected bounce classification and length description on frame
+        if last_bounce_classification != "N/A":
+             cv2.putText(frame, f"Bounce Classification: {last_bounce_classification}", (text_x, text_y_middle - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+             cv2.putText(frame, f"Length Description: {last_length_description}", (text_x, text_y_middle - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+             cv2.putText(frame, f"Shot Type: {shot_type}", (text_x, text_y_middle - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-    # Write the frame to the output video
-    out.write(annotated_frame)
+
+    # Write frame to the output video
+    out.write(frame)
 
 # Release resources
 cap.release()
 out.release()
+
