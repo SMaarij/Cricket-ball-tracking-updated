@@ -1,4 +1,4 @@
-                                                          Cricket Ball Tracking and Length Classification Project
+     Cricket Ball Tracking and Length Classification Project
 This project is a computer vision-based system for tracking a cricket ball during play and classifying its bounce position into categories such as yorker, full, good, or short. Using advanced object detection techniques and custom algorithms, the system analyzes video footage to detect the ball's motion, identify the bounce point, and classify the length based on predefined pitch zones.
 
 Key Features
